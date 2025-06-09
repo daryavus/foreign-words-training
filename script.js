@@ -50,11 +50,43 @@ const cards = [
 let currentPosition = 0;
 let shuffledIndexes = [];
 
+const STORAGE_KEY = 'languageAppProgress';
+
 totalWord.textContent = cards.length;
 
+function saveProgress() {
+  const progress = {
+    currentMode: examMode.classList.contains('hidden') ? 'study' : 'exam',
+    study: {
+      currentPosition,
+      shuffledIndexes,
+    },
+    exam: {
+      matchedPairs,
+      timeSpent: seconds,
+    }
+  };
+
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
+}
+
+function loadProgress() {
+  const saved = localStorage.getItem(STORAGE_KEY);
+  return saved ? JSON.parse(saved) : null;
+}
+
 function initCards() {
-  shuffledIndexes = [...Array(cards.length).keys()];
-  currentPosition = 0;
+  const savedProgress = loadProgress();
+  
+  if (savedProgress && savedProgress.study) {
+    shuffledIndexes = savedProgress.study.shuffledIndexes.length === cards.length 
+      ? savedProgress.study.shuffledIndexes 
+      : [...Array(cards.length).keys()];
+    currentPosition = savedProgress.study.currentPosition || 0;
+  } else {
+    shuffledIndexes = [...Array(cards.length).keys()];
+    currentPosition = 0;
+  }
 }
 
 function shuffleCards() {
@@ -63,7 +95,6 @@ function shuffleCards() {
     const j = Math.floor(Math.random() * (i + 1));
     [shuffledIndexes[i], shuffledIndexes[j]] = [shuffledIndexes[j], shuffledIndexes[i]];
   }
-  currentPosition = 0;
 }
 
 function createCard() {
@@ -75,19 +106,17 @@ function createCard() {
   cardBack.querySelector('div h1').textContent = russian;
   cardBack.querySelector('div p span').textContent = example;
 
-  studyProgress.value = 20 * (currentPosition + 1);
+  studyProgress.value = (100 / cards.length) * (currentPosition + 1);
   countWord.textContent = currentPosition + 1;
 
   updateButtons();
+  saveProgress();
 }
 
 function updateButtons() {
   arrowPrev.disabled = currentPosition <= 0;
   arrowNext.disabled = currentPosition >= cards.length - 1;
 }
-
-initCards();
-createCard();
 
 flipCard.addEventListener('click', () => flipCard.classList.toggle('active'));
 
@@ -117,6 +146,38 @@ let matchedPairs = [];
 let canFlip = true;
 let timerInterval;
 let seconds = 0;
+
+function initApp() {
+  const savedProgress = loadProgress();
+  initCards();
+  
+  if (savedProgress) {
+    if (savedProgress.currentMode === 'exam') {
+      switchToExamMode();
+      
+      matchedPairs = savedProgress.exam.matchedPairs || [];
+      seconds = savedProgress.exam.timeSpent || 0;
+      
+      renderExamCards();
+      startTimer();
+      
+      const percent = Math.round((matchedPairs.length / cards.length) * 100);
+      countPercent.textContent = percent;
+      examProgress.value = percent;
+      updateTimerDisplay();
+    } else {
+      createCard();
+    }
+  } else {
+    createCard();
+  }
+}
+
+function switchToExamMode() {
+  studyMode.classList.add('hidden');
+  examMode.classList.remove('hidden');
+  studyContent.classList.add('hidden');
+}
 
 function createExamCardElements() {
   const allCards = [];
@@ -151,6 +212,9 @@ function renderExamCards() {
     [shuffledCards[i], shuffledCards[j]] = [shuffledCards[j], shuffledCards[i]];
   }
 
+  const savedProgress = loadProgress();
+  const matched = savedProgress?.exam?.matchedPairs || [];
+
   shuffledCards.forEach((card, index) => {
     const cardEl = document.createElement('div');
     cardEl.className = 'card';
@@ -158,6 +222,10 @@ function renderExamCards() {
     cardEl.dataset.pairId = card.pairId;
     cardEl.dataset.content = card.content;
     cardEl.dataset.index = index;
+
+    if (matched.includes(card.pairId)) {
+      cardEl.classList.add('fade-out');
+    }
     
     cardEl.addEventListener('click', handleCardClick);
     container.appendChild(cardEl);
@@ -197,6 +265,7 @@ function handleCardClick(e) {
       countPercent.textContent = percent;
       examProgress.value = percent;
       
+      saveProgress();
       checkExamCompletion();
     } else {
       secondCard.classList.add('wrong');
@@ -215,14 +284,23 @@ function handleCardClick(e) {
 }
 
 function startTimer() {
-  seconds = 0;
+  const savedProgress = loadProgress();
+  seconds = savedProgress?.exam?.timeSpent || 0;
+
+  updateTimerDisplay();
+
   clearInterval(timerInterval);
   timerInterval = setInterval(function() {
     seconds++;
-    const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
-    const secs = (seconds % 60).toString().padStart(2, '0');
-    timer.textContent = `${mins}:${secs}`;
+    updateTimerDisplay();
+    saveProgress();
   }, 1000);
+}
+
+function updateTimerDisplay() {
+  const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const secs = (seconds % 60).toString().padStart(2, '0');
+  timer.textContent = `${mins}:${secs}`;
 }
 
 function resetExam() {
@@ -231,6 +309,8 @@ function resetExam() {
   matchedPairs = [];
   countPercent.textContent = '0';
   examProgress.value = '0';
+  seconds = 0;
+  saveProgress();
 }
 
 function checkExamCompletion() {
@@ -238,16 +318,44 @@ function checkExamCompletion() {
     clearInterval(timerInterval);
     setTimeout(() => {
       alert(`Поздравляем! Вы успешно завершили проверку за ${timer.textContent}!`);
+      resetToStudyMode();
     }, 500);
   }
 }
 
+function resetToStudyMode() {
+  localStorage.removeItem(STORAGE_KEY);
+  currentPosition = 0;
+  matchedPairs = [];
+  seconds = 0;
+  flippedCards = [];
+  canFlip = true;
+  
+  studyMode.classList.remove('hidden');
+  examMode.classList.add('hidden');
+  studyContent.classList.remove('hidden');
+  
+  countPercent.textContent = '0';
+  examProgress.value = '0';
+  timer.textContent = '00:00';
+  
+  initCards();
+  createCard();
+
+  saveProgress();
+}
+
 examButton.addEventListener('click', function() {
-  studyMode.classList.add('hidden');
-  examMode.classList.remove('hidden');
-  studyContent.classList.add('hidden');
+  switchToExamMode();
+
+  const savedProgress = loadProgress();
+  matchedPairs = savedProgress?.exam?.matchedPairs || [];
   
   resetExam();
   renderExamCards();
   startTimer();
 });
+
+initApp();
+
+
